@@ -5,16 +5,36 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 )
 
-const pattern = `=|<>|>|<|>=|<=|!=|AND|OR|IS\s+NULL|IS\s+NOT\s+NULL|LIKE|NOT\s+LIKE|ILIKE|NOT\s+ILIKE|IN|NOT\s+IN|\(|\)|"([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\'|\S+`
+const (
+	tokenizePattern  = `=|<>|>|<|>=|<=|!=|AND|OR|IS\s+NULL|IS\s+NOT\s+NULL|LIKE|NOT\s+LIKE|ILIKE|NOT\s+ILIKE|IN|NOT\s+IN|\(|\)|"([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\'|\S+`
+	normalizePatters = `(?i)\s+AND\s+|\s+OR\s+|\s+NULL|\s+IS\s+NULL|\s+IS\s+NOT\s+NULL|\s+LIKE\s+|\s+NOT\s+LIKE\s+|\s+ILIKE\s+|\s+NOT\s+ILIKE\s+|\s+IN\s+|\s+NOT\s+IN\s+`
+)
 
-var regex *regexp.Regexp
+var (
+	tokenizeRegex  *regexp.Regexp
+	normalizeRegex *regexp.Regexp
+
+	normalizeFilter atomic.Bool
+)
 
 func init() {
-	regex = regexp.MustCompile(pattern)
+	EnableNormalize()
+
+	tokenizeRegex = regexp.MustCompile(tokenizePattern)
+	normalizeRegex = regexp.MustCompile(normalizePatters)
+}
+
+func DisableNormalize() {
+	normalizeFilter.Store(false)
+}
+
+func EnableNormalize() {
+	normalizeFilter.Store(true)
 }
 
 type Filter struct {
@@ -65,13 +85,20 @@ func (f Filter) ToSQL() (string, []interface{}) {
 
 func ParseFilter(filter string) (f Filter) {
 	if filter = strings.TrimSpace(filter); filter != "" {
+		if normalizeFilter.Load() {
+			filter = normalize(filter)
+		}
 		f = toFilter(toTree(tokenize(filter)))
 	}
 	return
 }
 
+func normalize(filter string) string {
+	return normalizeRegex.ReplaceAllStringFunc(filter, func(w string) string { return strings.ToUpper(w) })
+}
+
 func tokenize(filter string) []string {
-	return regex.FindAllString(filter, -1)
+	return tokenizeRegex.FindAllString(filter, -1)
 }
 
 func toTree(tokens []string) []string {
