@@ -9,7 +9,7 @@ type Criteria struct {
 
 func New(filter, sort string) *Criteria {
 	return &Criteria{
-		Filter: ParseFilter(filter),
+		Filter: ParseFilter(filter, true),
 		SortBy: ParseSort(sort),
 	}
 }

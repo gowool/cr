@@ -5,51 +5,33 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	"github.com/google/uuid"
 )
 
 const (
-	tokenizePattern  = `=|<>|>|<|>=|<=|!=|AND|OR|IS\s+NULL|IS\s+NOT\s+NULL|LIKE|NOT\s+LIKE|ILIKE|NOT\s+ILIKE|IN|NOT\s+IN|\(|\)|"([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\'|\S+`
-	normalizePatters = `(?i)\s+AND\s+|\s+OR\s+|\s+NULL|\s+IS\s+NULL|\s+IS\s+NOT\s+NULL|\s+LIKE\s+|\s+NOT\s+LIKE\s+|\s+ILIKE\s+|\s+NOT\s+ILIKE\s+|\s+IN\s+|\s+NOT\s+IN\s+`
+	tokenizePattern   = `=|<>|>|<|>=|<=|!=|AND|OR|IS\s+NULL|IS\s+NOT\s+NULL|LIKE|NOT\s+LIKE|ILIKE|NOT\s+ILIKE|IN|NOT\s+IN|\(|\)|"([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\'|\S+`
+	normalizePatterns = `(?i)\s+AND\s+|\s+OR\s+|\s+NULL|\s+IS\s+NULL|\s+IS\s+NOT\s+NULL|\s+LIKE\s+|\s+NOT\s+LIKE\s+|\s+ILIKE\s+|\s+NOT\s+ILIKE\s+|\s+IN\s+|\s+NOT\s+IN\s+`
 )
 
 var (
-	tokenizeRegex  *regexp.Regexp
-	normalizeRegex *regexp.Regexp
-
-	normalizeFilter atomic.Bool
+	tokenizeRegex  = regexp.MustCompile(tokenizePattern)
+	normalizeRegex = regexp.MustCompile(normalizePatterns)
 )
-
-func init() {
-	EnableNormalize()
-
-	tokenizeRegex = regexp.MustCompile(tokenizePattern)
-	normalizeRegex = regexp.MustCompile(normalizePatters)
-}
-
-func DisableNormalize() {
-	normalizeFilter.Store(false)
-}
-
-func EnableNormalize() {
-	normalizeFilter.Store(true)
-}
 
 type Filter struct {
 	Operator   Operator
-	Conditions []interface{}
+	Conditions []any
 }
 
 func (f Filter) IsEmpty() bool {
 	return len(f.Conditions) == 0
 }
 
-func (f Filter) ToSQL() (string, []interface{}) {
+func (f Filter) ToSQL() (string, []any) {
 	var (
 		conditions []string
-		args       []interface{}
+		args       []any
 	)
 
 	for _, cond := range f.Conditions {
@@ -83,17 +65,17 @@ func (f Filter) ToSQL() (string, []interface{}) {
 	return strings.Join(conditions, fmt.Sprintf(" %s ", operator)), args
 }
 
-func ParseFilter(filter string) (f Filter) {
+func ParseFilter(filter string, normalize bool) (f Filter) {
 	if filter = strings.TrimSpace(filter); filter != "" {
-		if normalizeFilter.Load() {
-			filter = normalize(filter)
+		if normalize {
+			filter = normalizeFilter(filter)
 		}
 		f = toFilter(toTree(tokenize(filter)))
 	}
 	return
 }
 
-func normalize(filter string) string {
+func normalizeFilter(filter string) string {
 	return normalizeRegex.ReplaceAllStringFunc(filter, func(w string) string { return strings.ToUpper(w) })
 }
 
@@ -167,24 +149,36 @@ func toTree(tokens []string) []string {
 }
 
 func toFilter(tokens []string) Filter {
-	var stack []interface{}
+	var stack []any
 
 	for _, token := range tokens {
 		t := strings.ToUpper(token)
 		switch t {
 		case "AND", "OR":
+			if len(stack) < 2 {
+				return Filter{}
+			}
 			right := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			left := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			stack = append(stack, Filter{
 				Operator:   Operator(t),
-				Conditions: []interface{}{left, right},
+				Conditions: []any{left, right},
 			})
 		case "LIKE", "NOT LIKE", "ILIKE", "NOT ILIKE", "=", "<>", ">", "<", ">=", "<=", "!=":
-			right := stack[len(stack)-1].(string)
+			if len(stack) < 2 {
+				return Filter{}
+			}
+			right, ok := stack[len(stack)-1].(string)
+			if !ok {
+				return Filter{}
+			}
 			stack = stack[:len(stack)-1]
-			left := stack[len(stack)-1].(string)
+			left, ok := stack[len(stack)-1].(string)
+			if !ok {
+				return Filter{}
+			}
 			stack = stack[:len(stack)-1]
 			stack = append(stack, Condition{
 				Column:   left,
@@ -197,9 +191,7 @@ func toFilter(tokens []string) Filter {
 				right string
 			)
 			for len(stack) > 0 {
-				r := stack[len(stack)-1]
-
-				if s, ok := r.(string); ok {
+				if s, ok := stack[len(stack)-1].(string); ok {
 					right = left + right
 					left = s
 					stack = stack[:len(stack)-1]
@@ -211,12 +203,15 @@ func toFilter(tokens []string) Filter {
 			stack = append(stack, Condition{
 				Column:   left,
 				Operator: Operator(t),
-				Value: apply(strings.Split(right, ","), func(item string) interface{} {
+				Value: apply(strings.Split(right, ","), func(item string) any {
 					return cast(item)
 				}),
 			})
 		case "IS NULL", "IS NOT NULL":
-			left := stack[len(stack)-1].(string)
+			left, ok := stack[len(stack)-1].(string)
+			if !ok {
+				return Filter{}
+			}
 			stack = stack[:len(stack)-1]
 			stack = append(stack, Condition{
 				Column:   left,
@@ -232,15 +227,16 @@ func toFilter(tokens []string) Filter {
 		case Filter:
 			return f
 		case Condition:
-			return Filter{Conditions: []interface{}{f}}
+			return Filter{Conditions: []any{f}}
 		}
 	}
 
 	return Filter{}
 }
 
-func cast(value string) interface{} {
-	if strings.TrimSpace(value) == "" {
+func cast(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return value
 	}
 
@@ -261,15 +257,16 @@ func cast(value string) interface{} {
 		}
 	}
 
-	if strings.ToLower(value) == "true" {
+	switch strings.ToLower(value) {
+	case "true":
 		return true
-	}
-
-	if strings.ToLower(value) == "false" {
+	case "false":
 		return false
+	case "null":
+		return nil
 	}
 
-	if v, err := strconv.ParseInt(value, 0, 0); err == nil {
+	if v, err := strconv.ParseInt(value, 10, 64); err == nil {
 		return v
 	}
 
