@@ -1,0 +1,14 @@
+name: Lint Commit Messages
+on: [pull_request]
+
+jobs:
+  commit_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run linter
+        uses: wagoid/commitlint-github-action@v6
