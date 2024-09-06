@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/oklog/ulid/v2"
 )
 
 const (
@@ -246,6 +247,10 @@ func cast(value string) any {
 			value = value[1:last]
 
 			if v, err := uuid.Parse(value); err == nil {
+				return v
+			}
+
+			if v, err := ulid.ParseStrict(value); err == nil {
 				return v
 			}
 

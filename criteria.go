@@ -7,11 +7,21 @@ type Criteria struct {
 	Size   *int
 }
 
-func New(filter, sort string) *Criteria {
-	return &Criteria{
-		Filter: ParseFilter(filter, true),
-		SortBy: ParseSort(sort),
+func New(args ...string) *Criteria {
+	var (
+		filter Filter
+		sortBy SortBy
+	)
+
+	if len(args) > 0 {
+		filter = ParseFilter(args[0], false)
 	}
+
+	if len(args) > 1 {
+		sortBy = ParseSort(args[1])
+	}
+
+	return &Criteria{Filter: filter, SortBy: sortBy}
 }
 
 func (c *Criteria) SetFilter(filter Filter) *Criteria {
