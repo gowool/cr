@@ -20,12 +20,6 @@ type timeFormat struct {
 	typ    timeFormatType
 }
 
-func (f timeFormat) hasTimezone() bool {
-	// We don't include the formats with only named timezones, see
-	// https://github.com/golang/go/issues/19694#issuecomment-289103522
-	return f.typ >= timeFormatNumericTimezone && f.typ <= timeFormatNumericAndNamedTimezone
-}
-
 var (
 	timeFormats = []timeFormat{
 		// Keep common formats at the top.
@@ -61,8 +55,8 @@ func toTime(s string) (d time.Time, e error) {
 		if d, e = time.Parse(format.format, s); e == nil {
 			if format.typ <= timeFormatNamedTimezone {
 				year, month, day := d.Date()
-				hour, min, sec := d.Clock()
-				d = time.Date(year, month, day, hour, min, sec, d.Nanosecond(), time.UTC)
+				hour, m, sec := d.Clock()
+				d = time.Date(year, month, day, hour, m, sec, d.Nanosecond(), time.UTC)
 			}
 			return
 		}
